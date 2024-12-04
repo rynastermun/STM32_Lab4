@@ -1,0 +1,97 @@
+/*
+ * scheduler.c
+ *
+ *  Created on: Dec 2, 2024
+ *      Author: ADMIN PC
+ */
+
+#include "scheduler.h"
+
+typedef struct {
+    void (*pTask)(void); 		// Con trỏ hàm: trỏ đến hàm thực thi task
+    uint32_t Delay;             // Thời gian trễ trước khi thực thi
+    uint32_t Period;            // Chu kỳ lặp lại của task
+    uint8_t RunMe;         		// Cờ báo hiệu task sẵn sàng thực thi
+} sTask;
+
+sTask SCH_tasks_G[SCH_MAX_TASKS];
+
+void SCH_Init(void) {
+    for (uint8_t i = 0; i < SCH_MAX_TASKS; i++) {
+        SCH_tasks_G[i].pTask = NULL;
+        SCH_tasks_G[i].Delay = 0;
+        SCH_tasks_G[i].Period = 0;
+        SCH_tasks_G[i].RunMe = 0;
+    }
+}
+
+void SCH_Update(void) {
+    // Cập nhật trạng thái của task đầu tiên trong hàng đợi
+    if (SCH_tasks_G[0].pTask != NULL && SCH_tasks_G[0].RunMe == 0) {
+        if (SCH_tasks_G[0].Delay == 0) {
+            SCH_tasks_G[0].RunMe = 1; // Đánh dấu task đã sẵn sàng
+        } else {
+            SCH_tasks_G[0].Delay--;
+        }
+    }
+}
+
+void SCH_Add_Task(void (*pTask)(), uint32_t Delay, uint32_t Period) {
+    uint32_t AccumulatedDelay = 0;
+    uint8_t InsertPosition = 0;
+
+    // Xác định vị trí thích hợp để chèn task mới
+    for (InsertPosition = 0; InsertPosition < SCH_MAX_TASKS; InsertPosition++) {
+        if (SCH_tasks_G[InsertPosition].pTask == NULL ||
+            AccumulatedDelay + SCH_tasks_G[InsertPosition].Delay > Delay) {
+            break;
+        }
+        AccumulatedDelay += SCH_tasks_G[InsertPosition].Delay;
+    }
+
+    // Dịch chuyển các task để chèn task mới
+    for (uint8_t i = SCH_MAX_TASKS - 1; i > InsertPosition; i--) {
+        SCH_tasks_G[i] = SCH_tasks_G[i - 1];
+    }
+
+    // Gán thông tin task mới
+    SCH_tasks_G[InsertPosition].pTask = pTask;
+    SCH_tasks_G[InsertPosition].Delay = Delay - AccumulatedDelay;
+    SCH_tasks_G[InsertPosition].Period = Period;
+    SCH_tasks_G[InsertPosition].RunMe = (SCH_tasks_G[InsertPosition].Delay == 0) ? 1 : 0;
+
+    // Điều chỉnh thời gian trễ của task tiếp theo (nếu có)
+    if (InsertPosition + 1 < SCH_MAX_TASKS && SCH_tasks_G[InsertPosition + 1].pTask != NULL) {
+        SCH_tasks_G[InsertPosition + 1].Delay -= SCH_tasks_G[InsertPosition].Delay;
+    }
+}
+
+void SCH_Delete_Task(void) {
+    // Xóa task đầu tiên trong hàng đợi
+    for (uint8_t i = 0; i < SCH_MAX_TASKS - 1; i++) {
+        SCH_tasks_G[i] = SCH_tasks_G[i + 1];
+    }
+
+    // Đặt lại task cuối cùng
+    SCH_tasks_G[SCH_MAX_TASKS - 1].pTask = NULL;
+    SCH_tasks_G[SCH_MAX_TASKS - 1].Delay = 0;
+    SCH_tasks_G[SCH_MAX_TASKS - 1].Period = 0;
+    SCH_tasks_G[SCH_MAX_TASKS - 1].RunMe = 0;
+}
+
+void SCH_Dispatch_Tasks(void) {
+    if (SCH_tasks_G[0].RunMe > 0 && SCH_tasks_G[0].pTask != NULL) {
+        // Thực thi task
+        SCH_tasks_G[0].pTask();
+        SCH_tasks_G[0].RunMe = 0;
+
+        Task CompletedTask = SCH_tasks_G[0]; // Lưu thông tin task vừa thực thi
+        SCH_Delete_Task();                // Xóa task đã thực thi
+
+        // Nếu task có chu kỳ lặp lại, thêm lại vào hàng đợi
+        if (CompletedTask.Period != 0) {
+            SCH_Add_Task(CompletedTask.pTask, CompletedTask.Period, CompletedTask.Period);
+        }
+    }
+}
+
